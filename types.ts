@@ -64,3 +64,12 @@ export interface LogEntry {
   message: string;
   timestamp: number;
 }
+
+export interface GenerationTask {
+  id: string;
+  status: 'generating' | 'completed';
+  topic: string;
+  logs: LogEntry[];
+  result?: PebbleData;
+  progress: number; // 0-100 representation of phase
+}

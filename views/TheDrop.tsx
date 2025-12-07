@@ -1,35 +1,30 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Library, X, Box, GripHorizontal, FileText } from 'lucide-react';
-import { PebbleData, CognitiveLevel } from '../types';
+import { ArrowRight, Box, GripHorizontal, X } from 'lucide-react';
+import { PebbleData } from '../types';
 
 interface TheDropProps {
-  archive: PebbleData[];
-  onConstruct: (topic: string, references: PebbleData[]) => void;
-  onGoToArchive: () => void;
-  onSelectPebble: (pebble: PebbleData) => void;
+  references: PebbleData[];
+  onSetReferences: (refs: PebbleData[]) => void;
+  onConstruct: (topic: string) => void;
+  onTypingStateChange: (isTyping: boolean) => void;
+  archive: PebbleData[]; // Passed for dropping lookup
 }
 
-export const TheDrop: React.FC<TheDropProps> = ({ archive, onConstruct, onGoToArchive, onSelectPebble }) => {
+export const TheDrop: React.FC<TheDropProps> = ({ 
+  references, 
+  onSetReferences, 
+  onConstruct,
+  onTypingStateChange,
+  archive
+}) => {
   const [topic, setTopic] = useState('');
-  const [references, setReferences] = useState<PebbleData[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Filter out deleted items and sort by recent
-  const visibleArchive = archive
-    .filter(p => !p.isDeleted)
-    .sort((a, b) => b.timestamp - a.timestamp);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (topic.trim()) {
-      onConstruct(topic, references);
+      onConstruct(topic);
     }
-  };
-
-  const handleDragStart = (e: React.DragEvent, pebble: PebbleData) => {
-    e.dataTransfer.setData("text/pebble-id", pebble.id);
-    e.dataTransfer.effectAllowed = "link";
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -38,7 +33,8 @@ export const TheDrop: React.FC<TheDropProps> = ({ archive, onConstruct, onGoToAr
     const pebble = archive.find(p => p.id === pebbleId);
     
     if (pebble && !references.some(r => r.id === pebble.id)) {
-      setReferences(prev => [...prev, pebble]);
+      const newRefs = [...references, pebble];
+      onSetReferences(newRefs);
     }
   };
 
@@ -48,87 +44,29 @@ export const TheDrop: React.FC<TheDropProps> = ({ archive, onConstruct, onGoToAr
   };
 
   const removeReference = (id: string) => {
-    setReferences(prev => prev.filter(p => p.id !== id));
+    onSetReferences(references.filter(p => p.id !== id));
   };
 
   // Immersion Mode Logic
   useEffect(() => {
     if (topic) {
-      setIsTyping(true);
+      onTypingStateChange(true);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       
       typingTimeoutRef.current = setTimeout(() => {
-        setIsTyping(false);
+        onTypingStateChange(false);
       }, 3000);
+    } else {
+        onTypingStateChange(false);
     }
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [topic]);
+  }, [topic, onTypingStateChange]);
 
   return (
-    <div className="min-h-screen flex bg-stone-50 overflow-hidden font-sans">
-      
-      {/* --- LEFT: Archive Wing (22% width) --- */}
-      <aside 
-        className={`w-[22%] min-w-[260px] h-screen bg-stone-200/50 backdrop-blur-xl border-r border-stone-200 transition-all duration-1000 ease-in-out flex flex-col z-20 ${isTyping ? 'opacity-30 -translate-x-10' : 'opacity-100 translate-x-0'}`}
-      >
-        {/* Header */}
-        <div 
-          onClick={onGoToArchive}
-          className="p-6 border-b border-stone-200/50 cursor-pointer group flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2 text-stone-500 group-hover:text-stone-900 transition-colors">
-            <Library size={18} />
-            <span className="font-display font-bold text-sm tracking-widest uppercase">Archive</span>
-          </div>
-          <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
-        </div>
-
-        {/* Stream List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-thin">
-          {visibleArchive.map(pebble => (
-            <div 
-              key={pebble.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, pebble)}
-              onClick={() => onSelectPebble(pebble)}
-              className="group relative p-3 rounded-lg hover:bg-white/60 transition-all cursor-pointer select-none"
-            >
-              {/* State A: Minimal */}
-              <div className="flex items-center gap-3">
-                 <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${pebble.isVerified ? 'bg-green-500' : 'bg-stone-400'}`} />
-                 <span className="text-sm font-medium text-stone-500 group-hover:text-stone-900 truncate">
-                    {pebble.topic}
-                 </span>
-              </div>
-              
-              {/* State B: Peek (Hover Expansion) */}
-              <div className="hidden group-hover:block mt-3 pl-4 animate-in slide-in-from-top-1 fade-in duration-200">
-                  <p className="text-[10px] text-stone-400 font-serif leading-relaxed line-clamp-2">
-                     {pebble.content[CognitiveLevel.ELI5].summary}
-                  </p>
-                  <div className="flex gap-1 mt-2">
-                     {pebble.content[CognitiveLevel.ELI5].keywords.slice(0,2).map(k => (
-                        <span key={k} className="text-[9px] bg-stone-200/50 text-stone-500 px-1.5 py-0.5 rounded">#{k}</span>
-                     ))}
-                  </div>
-              </div>
-            </div>
-          ))}
-          
-          {visibleArchive.length === 0 && (
-             <div className="text-center py-10 text-xs text-stone-400 italic">
-                Your mind is clear.<br/>Cast your first pebble.
-             </div>
-          )}
-        </div>
-      </aside>
-
-
-      {/* --- RIGHT: Input Zone (Fluid) --- */}
-      <main 
-        className="flex-1 relative flex flex-col items-center justify-center p-8 transition-all duration-700"
+      <div 
+        className="flex-1 relative flex flex-col items-center justify-center p-8 transition-all duration-700 h-screen"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -178,7 +116,7 @@ export const TheDrop: React.FC<TheDropProps> = ({ archive, onConstruct, onGoToAr
             </div>
             
             {/* Helper Text */}
-            <div className={`mt-8 text-center transition-opacity duration-700 ${isTyping || references.length > 0 ? 'opacity-0' : 'opacity-40'}`}>
+            <div className={`mt-8 text-center transition-opacity duration-700 ${references.length > 0 ? 'opacity-0' : 'opacity-40'}`}>
                <p className="text-stone-400 text-sm flex items-center justify-center gap-2">
                   <GripHorizontal size={16} />
                   <span>Drag from archive to reference context</span>
@@ -187,8 +125,6 @@ export const TheDrop: React.FC<TheDropProps> = ({ archive, onConstruct, onGoToAr
 
          </form>
 
-      </main>
-
-    </div>
+      </div>
   );
 };

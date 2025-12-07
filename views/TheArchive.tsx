@@ -141,7 +141,7 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
 
   const handleDropOnFolder = (e: React.DragEvent, targetFolderId: string) => {
     e.preventDefault();
-    const idsToMove = Array.from(selectedIds);
+    const idsToMove: string[] = Array.from(selectedIds);
     if (idsToMove.length > 0) {
       idsToMove.forEach(id => onMovePebble(id, targetFolderId));
       setSelectedIds(new Set());
@@ -162,7 +162,7 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
     if (sourceId === targetPebble.id) return;
     
     // Check if dragging multiple items
-    const idsToMove = new Set(selectedIds);
+    const idsToMove = new Set<string>(selectedIds);
     // Ensure sourceId is included if it wasn't selected first
     if (sourceId) idsToMove.add(sourceId);
     
@@ -172,7 +172,7 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
     if (idsToMove.size === 0) return;
 
     // Create new folder containing the target + all dragged items
-    const initialIds = [targetPebble.id, ...Array.from(idsToMove)];
+    const initialIds: string[] = [targetPebble.id, ...Array.from(idsToMove)];
     onCreateFolder("New Collection", currentFolderId, initialIds);
     
     setDraggedPebbleId(null);
@@ -181,7 +181,7 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
 
   const handleDropOnTrash = (e: React.DragEvent) => {
     e.preventDefault();
-    const idsToDelete = Array.from(selectedIds);
+    const idsToDelete: string[] = Array.from(selectedIds);
     if (idsToDelete.length > 0) {
         performDelete(idsToDelete);
     } else {
@@ -315,7 +315,10 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
               <div className="h-px bg-stone-700 my-1 mx-2" />
               <button 
                  onClick={() => {
-                    if (contextMenu.targetId) performDelete(Array.from(selectedIds).length ? Array.from(selectedIds) : [contextMenu.targetId]);
+                    if (contextMenu.targetId) {
+                      const ids = Array.from(selectedIds).length > 0 ? Array.from(selectedIds) : [contextMenu.targetId];
+                      performDelete(ids as string[]);
+                    }
                     setContextMenu(prev => ({...prev, visible: false}));
                  }}
                  className="w-full text-left px-4 py-2 hover:bg-red-900/50 text-red-400 flex items-center gap-2"

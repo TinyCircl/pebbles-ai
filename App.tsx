@@ -1,46 +1,160 @@
-import React, { useState } from 'react';
-import { ViewState, PebbleData, Folder } from './types';
+import React, { useState, useEffect } from 'react';
+import { ViewState, PebbleData, Folder, GenerationTask } from './types';
 import { TheDrop } from './views/TheDrop';
 import { TheConstruct } from './views/TheConstruct';
 import { TheArtifact } from './views/TheArtifact';
 import { TheArchive } from './views/TheArchive';
+import { ArchiveSidebar } from './components/ArchiveSidebar';
+import { generatePebble } from './services/geminiService';
+import { CheckCircle2, ArrowRight } from 'lucide-react';
 
 const App: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>(ViewState.DROP);
-  const [currentTopic, setCurrentTopic] = useState<string>('');
-  const [currentReferences, setCurrentReferences] = useState<PebbleData[]>([]);
-  const [activePebble, setActivePebble] = useState<PebbleData | null>(null);
   
   // Data Store
   const [archive, setArchive] = useState<PebbleData[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
+  
+  // Sidebar State
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('pebbles_sidebar_width');
+    return saved ? parseInt(saved, 10) : 260;
+  });
 
-  // Transition: Drop -> Construct
-  const handleConstruct = (topic: string, references: PebbleData[] = []) => {
-    setCurrentTopic(topic);
-    setCurrentReferences(references);
-    setViewState(ViewState.CONSTRUCT);
+  // Input State
+  const [currentReferences, setCurrentReferences] = useState<PebbleData[]>([]);
+  const [isImmersionMode, setIsImmersionMode] = useState(false);
+
+  // Active View State
+  const [activePebble, setActivePebble] = useState<PebbleData | null>(null);
+
+  // Async Generation Task State
+  const [generationTask, setGenerationTask] = useState<GenerationTask | null>(null);
+  const [showCompletionToast, setShowCompletionToast] = useState(false);
+
+  // Persist sidebar width
+  const handleSetSidebarWidth = (width: number) => {
+    setSidebarWidth(width);
+    localStorage.setItem('pebbles_sidebar_width', width.toString());
   };
 
-  // Transition: Construct -> Artifact (Completion)
-  const handleGenerationComplete = (pebble: PebbleData) => {
-    setActivePebble(pebble);
-    setArchive(prev => {
-        const exists = prev.find(p => p.topic.toLowerCase() === pebble.topic.toLowerCase());
-        return exists ? prev : [pebble, ...prev];
+  // Folder Management Handlers
+  const handleRenameFolder = (id: string, newName: string) => {
+    setFolders(prev => prev.map(f => f.id === id ? { ...f, name: newName } : f));
+  };
+
+  const handleUngroupFolder = (folderId: string) => {
+    const folder = folders.find(f => f.id === folderId);
+    if (!folder) return;
+    
+    const targetParentId = folder.parentId;
+
+    // Move pebbles to parent
+    setArchive(prev => prev.map(p => 
+        p.folderId === folderId ? { ...p, folderId: targetParentId } : p
+    ));
+
+    // Move subfolders to parent
+    setFolders(prev => {
+        const remaining = prev.filter(f => f.id !== folderId);
+        return remaining.map(f => 
+            f.parentId === folderId ? { ...f, parentId: targetParentId } : f
+        );
     });
-    // Reset construct state
-    setCurrentReferences([]);
-    setViewState(ViewState.ARTIFACT);
   };
 
-  // Error handling in Construct
-  const handleGenerationError = (error: string) => {
-    alert(error);
-    setViewState(ViewState.DROP);
+  // --- Core Generation Logic (Background) ---
+  const handleStartConstruct = async (topic: string) => {
+    const taskId = crypto.randomUUID();
+    
+    // 1. Initialize Task
+    const newTask: GenerationTask = {
+        id: taskId,
+        status: 'generating',
+        topic,
+        logs: [{ message: `> Analyzing intent: "${topic}"...`, timestamp: Date.now() }],
+        progress: 10
+    };
+    setGenerationTask(newTask);
+    
+    // 2. Switch View (Optional - defaulting to Construct to show start)
+    setViewState(ViewState.CONSTRUCT);
+
+    // 3. Helper to update task safely
+    const updateTask = (updates: Partial<GenerationTask>) => {
+        setGenerationTask(prev => prev && prev.id === taskId ? { ...prev, ...updates } : prev);
+    };
+
+    const addLog = (msg: string) => {
+        setGenerationTask(prev => {
+            if (prev && prev.id === taskId) {
+                return { ...prev, logs: [...prev.logs, { message: msg, timestamp: Date.now() }] };
+            }
+            return prev;
+        });
+    };
+
+    // 4. Run Simulation & API Call
+    try {
+        await new Promise(r => setTimeout(r, 800));
+        addLog(`> Integrating ${currentReferences.length} context nodes...`);
+        updateTask({ progress: 20 });
+        
+        await new Promise(r => setTimeout(r, 800));
+        addLog(`> Retrieving semantic lattice...`);
+        updateTask({ progress: 50 });
+
+        await new Promise(r => setTimeout(r, 800));
+        addLog(`> Querying generative models...`);
+        updateTask({ progress: 70 });
+
+        // API Call
+        const pebble = await generatePebble(topic, currentReferences);
+        
+        addLog(`> Constructing artifacts...`);
+        updateTask({ progress: 90 });
+        await new Promise(r => setTimeout(r, 600));
+
+        // 5. Complete
+        setGenerationTask(prev => {
+             if(prev && prev.id === taskId) {
+                 return { ...prev, status: 'completed', result: pebble, progress: 100 };
+             }
+             return prev;
+        });
+        
+        // Notify
+        setShowCompletionToast(true);
+
+    } catch (error: any) {
+        console.error(error);
+        addLog(`> ERROR: ${error.message}`);
+        alert("Generation failed. See console.");
+        setGenerationTask(null);
+        setViewState(ViewState.DROP);
+    }
   };
 
-  // Mark as verified
+  const handleTaskClick = () => {
+      if (!generationTask) return;
+      
+      if (generationTask.status === 'completed' && generationTask.result) {
+          // Solidify
+          const newPebble = generationTask.result;
+          setArchive(prev => [newPebble, ...prev]);
+          setActivePebble(newPebble);
+          setViewState(ViewState.ARTIFACT);
+          
+          // Clear task
+          setGenerationTask(null);
+          setShowCompletionToast(false);
+          setCurrentReferences([]); // Reset refs
+      } else {
+          // View Progress
+          setViewState(ViewState.CONSTRUCT);
+      }
+  };
+
   const handleVerify = (pebbleId: string) => {
     setArchive(prev => prev.map(p => 
         p.id === pebbleId ? { ...p, isVerified: true } : p
@@ -59,8 +173,6 @@ const App: React.FC = () => {
       createdAt: Date.now()
     };
     setFolders(prev => [...prev, newFolder]);
-    
-    // Move initial pebbles into new folder
     if (initialPebbleIds.length > 0) {
       setArchive(prev => prev.map(p => 
         initialPebbleIds.includes(p.id) ? { ...p, folderId: newFolder.id } : p
@@ -106,47 +218,89 @@ const App: React.FC = () => {
   };
 
   return (
-    <main className="w-full min-h-screen font-sans">
-      {viewState === ViewState.DROP && (
-        <TheDrop 
-            archive={archive}
-            onConstruct={handleConstruct} 
-            onGoToArchive={goToArchive}
-            onSelectPebble={handleSelectFromArchive}
-        />
+    <div className="w-full min-h-screen font-sans flex overflow-hidden bg-stone-50">
+      
+      {/* Persistent Sidebar (except in full Archive view) */}
+      {viewState !== ViewState.ARCHIVE && (
+          <ArchiveSidebar 
+             archive={archive}
+             folders={folders}
+             generationTask={generationTask}
+             sidebarWidth={sidebarWidth}
+             onSetSidebarWidth={handleSetSidebarWidth}
+             onSelectPebble={handleSelectFromArchive}
+             onSelectTask={handleTaskClick}
+             onGoToArchive={goToArchive}
+             isImmersionMode={isImmersionMode && viewState === ViewState.DROP}
+             onRenamePebble={handleRenamePebble}
+             onDeletePebbles={handleDeletePebbles}
+             onRestorePebbles={handleRestorePebbles}
+             onMovePebble={handleMovePebble}
+             onRenameFolder={handleRenameFolder}
+             onUngroupFolder={handleUngroupFolder}
+          />
       )}
 
-      {viewState === ViewState.CONSTRUCT && (
-        <TheConstruct 
-            topic={currentTopic}
-            references={currentReferences}
-            onComplete={handleGenerationComplete}
-            onError={handleGenerationError}
-        />
-      )}
+      {/* Main Content Area */}
+      <main className="flex-1 relative overflow-hidden">
+          
+          {viewState === ViewState.DROP && (
+            <TheDrop 
+                references={currentReferences}
+                onSetReferences={setCurrentReferences}
+                onConstruct={handleStartConstruct}
+                onTypingStateChange={setIsImmersionMode}
+                archive={archive}
+            />
+          )}
 
-      {viewState === ViewState.ARTIFACT && activePebble && (
-        <TheArtifact 
-            pebble={activePebble} 
-            onVerify={handleVerify}
-            onBack={goToDrop}
-        />
-      )}
+          {viewState === ViewState.CONSTRUCT && generationTask && (
+            <TheConstruct task={generationTask} />
+          )}
 
-      {viewState === ViewState.ARCHIVE && (
-        <TheArchive 
-            pebbles={archive}
-            folders={folders}
-            onSelectPebble={handleSelectFromArchive}
-            onBack={goToDrop}
-            onCreateFolder={handleCreateFolder}
-            onMovePebble={handleMovePebble}
-            onRenamePebble={handleRenamePebble}
-            onDeletePebbles={handleDeletePebbles}
-            onRestorePebbles={handleRestorePebbles}
-        />
+          {viewState === ViewState.ARTIFACT && activePebble && (
+            <div className="h-screen overflow-y-auto">
+                <TheArtifact 
+                    pebble={activePebble} 
+                    onVerify={handleVerify}
+                    onBack={goToDrop}
+                />
+            </div>
+          )}
+
+          {viewState === ViewState.ARCHIVE && (
+            <div className="h-screen overflow-y-auto">
+                <TheArchive 
+                    pebbles={archive}
+                    folders={folders}
+                    onSelectPebble={handleSelectFromArchive}
+                    onBack={goToDrop}
+                    onCreateFolder={handleCreateFolder}
+                    onMovePebble={handleMovePebble}
+                    onRenamePebble={handleRenamePebble}
+                    onDeletePebbles={handleDeletePebbles}
+                    onRestorePebbles={handleRestorePebbles}
+                />
+            </div>
+          )}
+      </main>
+
+      {/* Completion Toast */}
+      {showCompletionToast && generationTask?.result && (
+        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-stone-900 text-stone-50 px-6 py-3 rounded-full shadow-2xl z-50 animate-[slideInUp_0.3s_ease-out] flex items-center gap-4">
+            <CheckCircle2 className="text-green-400" size={20} />
+            <span className="font-medium text-sm">
+                "{generationTask.result.topic}" is ready.
+            </span>
+            <button 
+               onClick={handleTaskClick}
+               className="bg-stone-700 hover:bg-stone-600 px-3 py-1 rounded-full text-xs font-bold transition-colors flex items-center gap-1"
+            >
+               View <ArrowRight size={12} />
+            </button>
+        </div>
       )}
-    </main>
+    </div>
   );
 };
 
