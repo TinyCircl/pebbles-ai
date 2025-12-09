@@ -7,7 +7,7 @@ import { TheArchive } from './views/TheArchive';
 import { AuthView } from './views/AuthView'; // 新增：认证视图
 import { ArchiveSidebar } from './components/ArchiveSidebar';
 import { pebbleApi, folderApi } from './services/api'; // 新增：API 服务
-import { CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
+import { CheckCircle2, ArrowRight, Loader2, LogOut } from 'lucide-react';
 
 const App: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>(ViewState.DROP);
@@ -67,6 +67,22 @@ const App: React.FC = () => {
     }
   };
 
+  // ★★★ 新增：处理退出登录 ★★★
+  const handleLogout = () => {
+    // 1. 清除本地存储的 Token
+    localStorage.removeItem('pebbles_token');
+    
+    // 2. 重置所有状态（防止下个用户看到上个用户的数据缓存）
+    setArchive([]);
+    setFolders([]);
+    setGenerationTask(null);
+    setActivePebble(null);
+    setCurrentReferences([]);
+    
+    // 3. 更新认证状态，这会触发页面重新渲染为 AuthView
+    setIsAuthenticated(false);
+  };
+
   // Persist sidebar width
   const handleSetSidebarWidth = (width: number) => {
     setSidebarWidth(width);
@@ -120,18 +136,23 @@ const App: React.FC = () => {
         const pebble = await pebbleApi.generate(topic, currentReferences);
         
         addLog(`> Constructing artifacts...`);
-        updateTask({ progress: 90 });
-        await new Promise(r => setTimeout(r, 600));
+        updateTask({ progress: 100 });
+        // 1. 给用户 1 秒钟的时间看到 "100%" 或完成状态，平滑过渡
+        await new Promise(r => setTimeout(r, 1000));
 
-        // Complete
-        setGenerationTask(prev => {
-             if(prev && prev.id === taskId) {
-                 return { ...prev, status: 'completed', result: pebble, progress: 100 };
-             }
-             return prev;
-        });
+        // 2. 直接执行跳转逻辑 (替代原来的 Toast)
+        // a. 将新生成的 Pebble 加入存档
+        setArchive(prev => [pebble, ...prev]); 
         
-        setShowCompletionToast(true);
+        // b. 设置为当前激活的 Pebble
+        setActivePebble(pebble);
+        
+        // c. 切换视图到 Artifact
+        setViewState(ViewState.ARTIFACT);
+
+        // 3. 清理任务状态
+        setGenerationTask(null);
+        setCurrentReferences([]);
 
     } catch (error: any) {
         console.error(error);
@@ -205,10 +226,17 @@ const App: React.FC = () => {
     return createdFolder.id;
   };
 
-  const handleRenameFolder = (id: string, newName: string) => {
-    // Note: Folder update API endpoint needed if we want to persist rename
-    // For now assuming we just update local, or you can add folderApi.update
+  const handleRenameFolder = async (id: string, newName: string) => {
+    // 1. 乐观更新 (Optimistic Update) - 让界面立刻变，不需要等待网络
     setFolders(prev => prev.map(f => f.id === id ? { ...f, name: newName } : f));
+    
+    // 2. 发送请求到后端保存
+    try {
+        await folderApi.update(id, { name: newName });
+    } catch (error) {
+        console.error("Failed to rename folder:", error);
+        // 可选：如果失败了，可以在这里回滚名字，或者弹出 Toast 提示
+    }
   };
 
   const handleUngroupFolder = async (folderId: string) => {
@@ -327,6 +355,158 @@ const App: React.FC = () => {
       }
   };
 
+  // ★★★ 1. 新增：添加版块逻辑 ★★★
+  const handleAddBlock = async (
+      pebbleId: string,
+      level: CognitiveLevel,
+      section: 'main' | 'sidebar',
+      index: number,
+      type: string
+  ) => {
+      let updatedContentForApi = null;
+
+      const updateFn = (prev: PebbleData[]) => prev.map(p => {
+          if (p.id !== pebbleId) return p;
+          
+          const levelContent = p.content[level];
+          // 创建新块的默认数据
+          let newBlock: any = { type, body: "New content...", isUserEdited: true };
+          
+          // 根据类型初始化特定字段
+          if (section === 'main') {
+              newBlock.heading = "New Section";
+              newBlock.iconType = 'default';
+              if (type === 'key_points') newBlock.body = ["Point 1", "Point 2"];
+          } else {
+              newBlock.heading = "New Item";
+              if (type === 'profile') newBlock.emoji = '👤';
+              if (type === 'stat') newBlock.emoji = '📊';
+          }
+
+          const newBlocks = section === 'main' 
+              ? [...levelContent.mainContent] 
+              : [...levelContent.sidebarContent];
+          
+          // 在指定 index 插入
+          newBlocks.splice(index, 0, newBlock);
+
+          const newContent = {
+              ...levelContent,
+              [section === 'main' ? 'mainContent' : 'sidebarContent']: newBlocks
+          };
+
+          const newPebble = { ...p, content: { ...p.content, [level]: newContent } };
+          updatedContentForApi = newPebble.content;
+          return newPebble;
+      });
+
+      setArchive(updateFn);
+      
+      // 同步 ActivePebble
+      if (activePebble?.id === pebbleId) {
+          setActivePebble(prev => {
+              if (!prev) return null;
+              const content = updateFn([prev])[0].content[level];
+              return { ...prev, content: { ...prev.content, [level]: content } };
+          });
+      }
+
+      if (updatedContentForApi) await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+  };
+
+  // ★★★ 2. 新增：移动版块逻辑 ★★★
+  const handleMoveBlock = async (
+      pebbleId: string,
+      level: CognitiveLevel,
+      section: 'main' | 'sidebar',
+      fromIndex: number,
+      direction: 'up' | 'down'
+  ) => {
+      const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+      
+      // 边界检查在 UI 层做，这里也可以兜底
+      if (toIndex < 0) return; 
+
+      let updatedContentForApi = null;
+
+      const updateFn = (prev: PebbleData[]) => prev.map(p => {
+          if (p.id !== pebbleId) return p;
+          
+          const levelContent = p.content[level];
+          const blocks = section === 'main' ? [...levelContent.mainContent] : [...levelContent.sidebarContent];
+          
+          if (toIndex >= blocks.length) return p;
+
+          // 交换位置
+          const temp = blocks[fromIndex];
+          blocks[fromIndex] = blocks[toIndex];
+          blocks[toIndex] = temp;
+
+          const newContent = {
+              ...levelContent,
+              [section === 'main' ? 'mainContent' : 'sidebarContent']: blocks
+          };
+
+          const newPebble = { ...p, content: { ...p.content, [level]: newContent } };
+          updatedContentForApi = newPebble.content;
+          return newPebble;
+      });
+
+      setArchive(updateFn);
+      
+      if (activePebble?.id === pebbleId) {
+          setActivePebble(prev => {
+              if (!prev) return null;
+              const content = updateFn([prev])[0].content[level];
+              return { ...prev, content: { ...prev.content, [level]: content } };
+          });
+      }
+
+      if (updatedContentForApi) await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+  };
+
+  // ★★★ 3. 新增：删除版块逻辑 ★★★
+  const handleDeleteBlock = async (
+      pebbleId: string,
+      level: CognitiveLevel,
+      section: 'main' | 'sidebar',
+      index: number
+  ) => {
+      if (!confirm("Are you sure you want to remove this block?")) return;
+
+      let updatedContentForApi = null;
+
+      const updateFn = (prev: PebbleData[]) => prev.map(p => {
+          if (p.id !== pebbleId) return p;
+          
+          const levelContent = p.content[level];
+          const blocks = section === 'main' ? [...levelContent.mainContent] : [...levelContent.sidebarContent];
+          
+          blocks.splice(index, 1); // 删除
+
+          const newContent = {
+              ...levelContent,
+              [section === 'main' ? 'mainContent' : 'sidebarContent']: blocks
+          };
+
+          const newPebble = { ...p, content: { ...p.content, [level]: newContent } };
+          updatedContentForApi = newPebble.content;
+          return newPebble;
+      });
+
+      setArchive(updateFn);
+      
+      if (activePebble?.id === pebbleId) {
+          setActivePebble(prev => {
+              if (!prev) return null;
+              const content = updateFn([prev])[0].content[level];
+              return { ...prev, content: { ...prev.content, [level]: content } };
+          });
+      }
+
+      if (updatedContentForApi) await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+  };
+
   const handleUpdateEmojiCollage = async (pebbleId: string, level: CognitiveLevel, newEmojis: string[]) => {
      let updatedPebbleContent: any = null;
 
@@ -437,6 +617,9 @@ const App: React.FC = () => {
                     onBack={goToDrop}
                     onUpdateContent={handleUpdatePebbleContent}
                     onUpdateEmoji={handleUpdateEmojiCollage}
+                    onAddBlock={handleAddBlock} // 新增：添加版块
+                    onMoveBlock={handleMoveBlock} // 新增：移动版块
+                    onDeleteBlock={handleDeleteBlock} // 新增：删除版块
                 />
             </div>
           )}
@@ -457,6 +640,18 @@ const App: React.FC = () => {
             </div>
           )}
       </main>
+
+      {/* ★★★ 新增：右上角退出按钮 ★★★ */}
+      {/* 只在已登录状态下显示 */}
+      {isAuthenticated && viewState !== ViewState.ARCHIVE && (
+        <button 
+          onClick={handleLogout}
+          className="fixed top-6 right-6 z-50 p-2.5 bg-white/80 backdrop-blur border border-stone-200 rounded-full text-stone-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all shadow-sm hover:shadow-md group"
+          title="Log Out"
+        >
+           <LogOut size={18} className="group-hover:-translate-x-0.5 transition-transform" />
+        </button>
+      )}
 
       {/* Completion Toast */}
       {showCompletionToast && generationTask?.result && (

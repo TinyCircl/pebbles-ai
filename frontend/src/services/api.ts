@@ -80,5 +80,10 @@ export const folderApi = {
   create: async (folder: Folder) => {
     const res = await api.post('/api/folders', folder);
     return res.data;
+  },
+  // ★★★ 新增：更新文件夹方法 ★★★
+  update: async (id: string, updates: Partial<Folder>) => {
+    const res = await api.put(`/api/folders/${id}`, updates);
+    return res.data;
   }
 };

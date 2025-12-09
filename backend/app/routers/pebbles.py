@@ -53,3 +53,14 @@ async def create_folder(folder: Folder, current_user: dict = Depends(get_current
     folder.owner_id = current_user["username"]
     await folders_collection.insert_one(folder.dict())
     return folder
+
+# ★★★ 新增：更新文件夹接口 ★★★
+@router.put("/folders/{folder_id}")
+async def update_folder(folder_id: str, update_data: dict, current_user: dict = Depends(get_current_user)):
+    # 同样只允许修改属于当前用户的文件夹
+    result = await folders_collection.update_one(
+        {"id": folder_id, "owner_id": current_user["username"]},
+        {"$set": update_data}
+    )
+    # 即使没有修改行数(名字一样)也返回成功
+    return {"status": "success", "id": folder_id}
