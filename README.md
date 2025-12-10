@@ -1,5 +1,5 @@
 # 目前pebbles项目还在立项阶段
-# 目前正在添加后端和数据库模块并部署到服务器查看
+# www.richardiffusion.me/pebbles
 
 <img width="2850" height="1758" alt="image" src="https://github.com/user-attachments/assets/81beef31-8fa5-4471-b5ff-305ee90c28aa" />
 
