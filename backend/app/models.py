@@ -41,6 +41,9 @@ class Pebble(BaseModel):
     folderId: Optional[str] = None
     isVerified: bool = False
     isDeleted: bool = False
+    # ★★★ 新增：追踪是否有人工编辑 ★★★
+    isUserEdited: bool = False
+
     # 这里的 Dict key 是 CognitiveLevel 的值 ('ELI5', 'ACADEMIC')
     content: Dict[str, LevelContent] 
     socraticQuestions: List[str]

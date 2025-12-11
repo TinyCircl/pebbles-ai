@@ -709,11 +709,12 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
             onDragStart={(e) => handleDragStart(e, pebble.id)}
             onClick={(e) => {
                 if (isEditing) return;
-                setPreviewPebble(pebble); // Click opens side preview
+                setPreviewPebble(pebble);
             }}
             onDoubleClick={() => !isEditing && onSelectPebble(pebble)}
             className={`group flex items-center py-3 border-b border-stone-800 hover:bg-stone-800 transition-colors cursor-pointer ${isPreviewing ? 'bg-stone-800 border-l-4 border-l-stone-100' : 'border-l-4 border-l-transparent'}`}
         >
+        {/* 1. Checkbox */}
         <div className="pl-4 pr-2" onClick={(e) => {
             e.stopPropagation();
             const next = new Set(selectedIds);
@@ -724,26 +725,37 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
             {isSelected ? <CheckSquare size={16} className="text-stone-300" /> : <Square size={16} className="text-stone-700 group-hover:text-stone-500" />}
         </div>
 
+        {/* 2. Title & Verified Dot */}
         <div className="flex-1 flex items-center min-w-0" style={{ paddingLeft: `${depth * 24}px` }}>
             {depth > 0 && <div className="absolute left-0 w-px h-full bg-stone-800" style={{ left: `${depth * 24 + 40}px`}} />}
             <FileText size={16} className={`mr-3 flex-shrink-0 ${isPreviewing ? 'text-stone-100' : 'text-stone-500'}`} />
             
-            {isEditing ? (
-                <input 
-                    type="text"
-                    className="rename-input bg-stone-900 border-b border-stone-400 text-sm font-medium text-white w-full focus:outline-none"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingId(null); }}
-                    autoFocus
-                    onBlur={commitRename}
-                    onClick={(e) => e.stopPropagation()}
-                />
-            ) : (
-                <span className={`font-medium truncate ${isPreviewing ? 'text-white' : 'text-stone-300'}`}>
-                    {pebble.topic}
-                </span>
-            )}
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+                {isEditing ? (
+                    <input 
+                        type="text"
+                        className="rename-input bg-stone-900 border-b border-stone-400 text-sm font-medium text-white w-full focus:outline-none"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingId(null); }}
+                        autoFocus
+                        onBlur={commitRename}
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                ) : (
+                    <span className={`font-medium truncate ${isPreviewing ? 'text-white' : 'text-stone-300'}`}>
+                        {pebble.topic}
+                    </span>
+                )}
+                
+                {/* ★★★ 核心修改 1：这里用小绿点代替 Verified 文字 ★★★ */}
+                {pebble.isVerified && (
+                    <div 
+                        className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] flex-shrink-0" 
+                        title="Verified Knowledge"
+                    />
+                )}
+            </div>
             
             <button 
                 className={`ml-2 text-stone-600 hover:text-stone-300 ${isEditing ? 'hidden' : 'opacity-0 group-hover:opacity-100 transition-opacity'}`}
@@ -756,13 +768,21 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
             ))}
         </div>
         
+        {/* ★★★ 核心修改 2：Status 列显示 Edited 或 Generated ★★★ */}
+        {/* 以前这里显示的是 Draft/Verified，现在改掉了 */}
         <div className="w-32 hidden md:flex justify-end items-center px-4">
-            {pebble.isVerified ? (
-                <div className="flex items-center gap-1.5 text-green-500/80"><CheckCircle2 size={14} /><span className="text-xs font-medium">Verified</span></div>
+            {pebble.isUserEdited ? (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-900/20 px-2 py-0.5 rounded border border-amber-900/30">
+                    Edited
+                </span>
             ) : (
-                <div className="flex items-center gap-1.5 text-stone-600"><Circle size={14} /><span className="text-xs">Draft</span></div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 bg-blue-900/20 px-2 py-0.5 rounded border border-blue-900/30">
+                    Generated
+                </span>
             )}
         </div>
+
+        {/* 4. Date */}
         <div className="w-40 hidden md:flex justify-end items-center px-4 text-xs text-stone-500">{new Date(pebble.timestamp).toLocaleDateString()}</div>
         </div>
       );

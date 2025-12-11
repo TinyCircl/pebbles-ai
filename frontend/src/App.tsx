@@ -319,7 +319,7 @@ const App: React.FC = () => {
 
   // --- Content Updates (Complex Object) ---
 
-  // ★★★ 新增：处理 Title, Summary, Keywords 的更新 ★★★
+  // ★★★ 修复：处理 Title, Summary, Keywords 的更新 ★★★
   const handleUpdateLevelMetadata = async (
       pebbleId: string, 
       level: CognitiveLevel, 
@@ -328,29 +328,29 @@ const App: React.FC = () => {
   ) => {
       let updatedContentForApi = null;
 
-      // 1. 更新 Archive 列表 (全局缓存)
+      // 1. 更新 Archive 列表
       const updateFn = (prev: PebbleData[]) => prev.map(p => {
           if (p.id !== pebbleId) return p;
           
-          // 深度拷贝 content 防止引用未更新
           const newContent = { ...p.content };
           const newLevelContent = { ...newContent[level] };
           
-          // 更新字段
-          // @ts-ignore - 动态字段赋值，TypeScript可能会报错，忽略即可
+          // @ts-ignore
           newLevelContent[field] = value;
-          
           newContent[level] = newLevelContent;
           
-          const newPebble = { ...p, content: newContent };
-          updatedContentForApi = newContent; // 捕获用于 API 发送
+          const newPebble = { 
+              ...p, 
+              content: newContent,
+              isUserEdited: true // Local State Update
+          };
+          updatedContentForApi = newContent; 
           return newPebble;
       });
 
       setArchive(updateFn);
       
-      // 2. 同步更新 activePebble (当前视图状态)
-      // 如果不更新这个，编辑器里的内容可能会跳回旧值
+      // 2. 同步 ActivePebble
       if (activePebble?.id === pebbleId) {
           setActivePebble(prev => {
               if (!prev) return null;
@@ -360,16 +360,19 @@ const App: React.FC = () => {
               newLevelContent[field] = value;
               newContent[level] = newLevelContent;
               
-              return { ...prev, content: newContent };
+              return { ...prev, content: newContent, isUserEdited: true };
           });
       }
 
-      // 3. API 调用 (持久化保存)
+      // 3. API 调用
       if (updatedContentForApi) {
           setSaveStatus('saving');
           try {
-              // 注意：后端只需要 content 字段即可更新所有子内容
-              await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+              // ★★★ 关键修改：发送 content 的同时，发送 isUserEdited: true ★★★
+              await pebbleApi.update(pebbleId, { 
+                  content: updatedContentForApi,
+                  isUserEdited: true 
+              });
               setTimeout(() => setSaveStatus('saved'), 500);
           } catch (e) {
               console.error(e);
@@ -413,7 +416,7 @@ const App: React.FC = () => {
       updatedBlock: MainBlock | SidebarBlock
   ) => {
       // 1. Calculate New State
-      let updatedPebbleContent: any = null;
+      let updatedContentForApi: any = null;
 
       const updateFn = (prev: PebbleData[]) => prev.map(p => {
           if (p.id !== pebbleId) return p;
@@ -436,9 +439,13 @@ const App: React.FC = () => {
               content: {
                   ...p.content,
                   [level]: newContent
-              }
+              },
+              isUserEdited: true // ★★★ 核心修改：标记为已人工编辑 ★★★  
           };
-          updatedPebbleContent = newPebble.content; // Capture for API
+          updatedContentForApi = { 
+              content: newPebble.content, 
+              isUserEdited: true // ★★★ API 请求也要带上这个字段 ★★★
+          };
           return newPebble;
       });
 
@@ -465,10 +472,10 @@ const App: React.FC = () => {
       }
 
       // 3. API Call
-      if (updatedPebbleContent) {
+      if (updatedContentForApi) {
         setSaveStatus('saving'); // ★ 开始保存
                 try {
-                    await pebbleApi.update(pebbleId, { content: updatedPebbleContent });
+                    await pebbleApi.update(pebbleId, updatedContentForApi);
                     // 稍微延迟一下变回 Saved，让用户看清
                     setTimeout(() => setSaveStatus('saved'), 500); 
                 } catch (e) {
@@ -478,7 +485,7 @@ const App: React.FC = () => {
             }
   };
 
-  // ★★★ 1. 新增：添加版块逻辑 ★★★
+  // ★★★ 修复：添加版块逻辑 ★★★
   const handleAddBlock = async (
       pebbleId: string,
       level: CognitiveLevel,
@@ -486,16 +493,14 @@ const App: React.FC = () => {
       index: number,
       type: string
   ) => {
-      let updatedContentForApi = null;
+      let apiPayload = null; // 用于存储 API 请求数据
 
       const updateFn = (prev: PebbleData[]) => prev.map(p => {
           if (p.id !== pebbleId) return p;
           
           const levelContent = p.content[level];
-          // 创建新块的默认数据
           let newBlock: any = { type, body: "New content...", isUserEdited: true };
           
-          // 根据类型初始化特定字段
           if (section === 'main') {
               newBlock.heading = "New Section";
               newBlock.iconType = 'default';
@@ -510,7 +515,6 @@ const App: React.FC = () => {
               ? [...levelContent.mainContent] 
               : [...levelContent.sidebarContent];
           
-          // 在指定 index 插入
           newBlocks.splice(index, 0, newBlock);
 
           const newContent = {
@@ -518,26 +522,36 @@ const App: React.FC = () => {
               [section === 'main' ? 'mainContent' : 'sidebarContent']: newBlocks
           };
 
-          const newPebble = { ...p, content: { ...p.content, [level]: newContent } };
-          updatedContentForApi = newPebble.content;
+          const newPebble = { 
+              ...p, 
+              content: { ...p.content, [level]: newContent },
+              isUserEdited: true // Local Update
+          };
+          
+          // ★★★ 构造正确的 API Payload ★★★
+          apiPayload = {
+              content: newPebble.content,
+              isUserEdited: true
+          };
+          
           return newPebble;
       });
 
       setArchive(updateFn);
       
-      // 同步 ActivePebble
       if (activePebble?.id === pebbleId) {
           setActivePebble(prev => {
               if (!prev) return null;
               const content = updateFn([prev])[0].content[level];
-              return { ...prev, content: { ...prev.content, [level]: content } };
+              return { ...prev, content: { ...prev.content, [level]: content }, isUserEdited: true };
           });
       }
 
-      if (updatedContentForApi) await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+      // ★★★ 发送 Payload ★★★
+      if (apiPayload) await pebbleApi.update(pebbleId, apiPayload);
   };
-
-  // ★★★ 2. 新增：移动版块逻辑 ★★★
+  
+  // ★★★ 修复：移动版块逻辑 ★★★
   const handleMoveBlock = async (
       pebbleId: string,
       level: CognitiveLevel,
@@ -546,11 +560,9 @@ const App: React.FC = () => {
       direction: 'up' | 'down'
   ) => {
       const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
-      
-      // 边界检查在 UI 层做，这里也可以兜底
       if (toIndex < 0) return; 
 
-      let updatedContentForApi = null;
+      let apiPayload = null;
 
       const updateFn = (prev: PebbleData[]) => prev.map(p => {
           if (p.id !== pebbleId) return p;
@@ -560,7 +572,6 @@ const App: React.FC = () => {
           
           if (toIndex >= blocks.length) return p;
 
-          // 交换位置
           const temp = blocks[fromIndex];
           blocks[fromIndex] = blocks[toIndex];
           blocks[toIndex] = temp;
@@ -570,8 +581,16 @@ const App: React.FC = () => {
               [section === 'main' ? 'mainContent' : 'sidebarContent']: blocks
           };
 
-          const newPebble = { ...p, content: { ...p.content, [level]: newContent } };
-          updatedContentForApi = newPebble.content;
+          const newPebble = { 
+              ...p, 
+              content: { ...p.content, [level]: newContent },
+              isUserEdited: true 
+          };
+          
+          apiPayload = {
+              content: newPebble.content,
+              isUserEdited: true
+          };
           return newPebble;
       });
 
@@ -581,14 +600,14 @@ const App: React.FC = () => {
           setActivePebble(prev => {
               if (!prev) return null;
               const content = updateFn([prev])[0].content[level];
-              return { ...prev, content: { ...prev.content, [level]: content } };
+              return { ...prev, content: { ...prev.content, [level]: content }, isUserEdited: true };
           });
       }
 
-      if (updatedContentForApi) await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+      if (apiPayload) await pebbleApi.update(pebbleId, apiPayload);
   };
 
-  // ★★★ 3. 新增：删除版块逻辑 ★★★
+  // ★★★ 修复：删除版块逻辑 ★★★
   const handleDeleteBlock = async (
       pebbleId: string,
       level: CognitiveLevel,
@@ -597,7 +616,7 @@ const App: React.FC = () => {
   ) => {
       if (!confirm("Are you sure you want to remove this block?")) return;
 
-      let updatedContentForApi = null;
+      let apiPayload = null;
 
       const updateFn = (prev: PebbleData[]) => prev.map(p => {
           if (p.id !== pebbleId) return p;
@@ -605,15 +624,23 @@ const App: React.FC = () => {
           const levelContent = p.content[level];
           const blocks = section === 'main' ? [...levelContent.mainContent] : [...levelContent.sidebarContent];
           
-          blocks.splice(index, 1); // 删除
+          blocks.splice(index, 1);
 
           const newContent = {
               ...levelContent,
               [section === 'main' ? 'mainContent' : 'sidebarContent']: blocks
           };
 
-          const newPebble = { ...p, content: { ...p.content, [level]: newContent } };
-          updatedContentForApi = newPebble.content;
+          const newPebble = { 
+              ...p, 
+              content: { ...p.content, [level]: newContent },
+              isUserEdited: true 
+          };
+          
+          apiPayload = {
+              content: newPebble.content,
+              isUserEdited: true
+          };
           return newPebble;
       });
 
@@ -623,11 +650,11 @@ const App: React.FC = () => {
           setActivePebble(prev => {
               if (!prev) return null;
               const content = updateFn([prev])[0].content[level];
-              return { ...prev, content: { ...prev.content, [level]: content } };
+              return { ...prev, content: { ...prev.content, [level]: content }, isUserEdited: true };
           });
       }
 
-      if (updatedContentForApi) await pebbleApi.update(pebbleId, { content: updatedContentForApi });
+      if (apiPayload) await pebbleApi.update(pebbleId, apiPayload);
   };
 
   const handleUpdateEmojiCollage = async (pebbleId: string, level: CognitiveLevel, newEmojis: string[]) => {

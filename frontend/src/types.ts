@@ -59,8 +59,12 @@ export interface PebbleData {
     [CognitiveLevel.ACADEMIC]: CognitiveContent;
   };
   socraticQuestions: string[];
-  isVerified: boolean; // Acts as "Mastery Level"
-  isDeleted?: boolean; // Soft delete flag
+  isVerified: boolean; // Acts as "Mastery Level" (Verified 状态)
+  isDeleted?: boolean; // Soft delete flag (软删除标记)
+  
+  // ★★★ 新增：标记是否经过人工编辑 ★★★
+  // true = Edited, false/undefined = Generated
+  isUserEdited?: boolean; 
 }
 
 export interface LogEntry {
