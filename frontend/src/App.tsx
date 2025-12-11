@@ -262,18 +262,30 @@ const App: React.FC = () => {
     
     const targetParentId = folder.parentId;
 
-    // Local Update
+    // 1. 本地乐观更新 (让 UI 瞬间反应)
+    // 移出 Pebbles
     setArchive(prev => prev.map(p => 
         p.folderId === folderId ? { ...p, folderId: targetParentId } : p
     ));
-    setFolders(prev => prev.filter(f => f.id !== folderId).map(f => 
-        f.parentId === folderId ? { ...f, parentId: targetParentId } : f
-    ));
+    
+    // 移出子文件夹，并删除当前文件夹
+    setFolders(prev => {
+        // 先把子文件夹移出来
+        const updated = prev.map(f => 
+            f.parentId === folderId ? { ...f, parentId: targetParentId } : f
+        );
+        // 再把自己删掉
+        return updated.filter(f => f.id !== folderId);
+    });
 
-    // Backend: Ideally we need a bulk update API, here iterating for simplicity
-    // NOTE: This assumes we delete the folder? The original logic just ungroups.
-    // If "Ungroup" implies deleting the folder structure:
-    // await api.delete(`/api/folders/${folderId}`); 
+    // 2. 调用后端 API
+    try {
+        await folderApi.ungroup(folderId);
+    } catch (e) {
+        console.error("Ungroup failed", e);
+        // 这里可以加一个 toast 提示失败并刷新数据
+        loadUserData(); 
+    }
   };
 
   const handleMovePebble = async (pebbleId: string, targetFolderId: string | null) => {
@@ -750,8 +762,10 @@ const App: React.FC = () => {
                     onCreateFolder={handleCreateFolder}
                     onMovePebble={handleMovePebble}
                     onRenamePebble={handleRenamePebble}
+                    onRenameFolder={handleRenameFolder}
                     onDeletePebbles={handleDeletePebbles}
                     onRestorePebbles={handleRestorePebbles}
+                    onUngroupFolder={handleUngroupFolder} // <--- 传递进去
                 />
             </div>
           )}

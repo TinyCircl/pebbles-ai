@@ -94,5 +94,10 @@ export const folderApi = {
   update: async (id: string, updates: Partial<Folder>) => {
     const res = await api.put(`/api/folders/${id}`, updates); // 加了 /api
     return res.data;
+  },
+  // ★★★ 新增Ungroup文件夹 ★★★
+  ungroup: async (id: string) => {
+    const res = await api.post(`/api/folders/${id}/ungroup`);
+    return res.data;
   }
 };

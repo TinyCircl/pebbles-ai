@@ -70,3 +70,29 @@ async def update_folder(folder_id: str, update_data: dict, current_user: dict = 
     )
     # 即使没有修改行数(名字一样)也返回成功
     return {"status": "success", "id": folder_id}
+
+@router.post("/folders/{folder_id}/ungroup")
+async def ungroup_folder_endpoint(folder_id: str, current_user: dict = Depends(get_current_user)):
+    # 1. 获取当前文件夹信息（为了知道它的 parentId 是什么）
+    folder = await folders_collection.find_one({"id": folder_id, "owner_id": current_user["username"]})
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    
+    target_parent_id = folder.get("parentId")
+
+    # 2. 将该文件夹下的所有 Pebble 移动到上一级
+    await pebbles_collection.update_many(
+        {"folderId": folder_id, "owner_id": current_user["username"]},
+        {"$set": {"folderId": target_parent_id}}
+    )
+
+    # 3. 将该文件夹下的所有 子文件夹 移动到上一级
+    await folders_collection.update_many(
+        {"parentId": folder_id, "owner_id": current_user["username"]},
+        {"$set": {"parentId": target_parent_id}}
+    )
+
+    # 4. 删除空文件夹
+    await folders_collection.delete_one({"id": folder_id})
+
+    return {"status": "ungrouped", "moved_to": target_parent_id}

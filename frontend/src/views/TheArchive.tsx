@@ -6,7 +6,7 @@ import {
   LayoutGrid, List as ListIcon, ChevronDown, CheckCircle2, 
   Circle, FileText, X, Image as ImageIcon, MoreHorizontal,
   Trash2, Edit2, Info, CheckSquare, Square, Undo, CornerDownLeft,
-  Maximize2, BookOpen
+  Maximize2, BookOpen, Layers
 } from 'lucide-react';
 
 interface TheArchiveProps {
@@ -17,8 +17,10 @@ interface TheArchiveProps {
   onCreateFolder: (name: string, parentId: string | null, initialPebbleIds: string[]) => string;
   onMovePebble: (pebbleId: string, targetFolderId: string | null) => void;
   onRenamePebble: (id: string, newTopic: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
   onDeletePebbles: (ids: string[]) => void;
   onRestorePebbles: (ids: string[]) => void;
+  onUngroupFolder: (id: string) => void; // <--- 新增
 }
 
 type ArchiveTab = 'vault' | 'stream' | 'orbit';
@@ -133,8 +135,10 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
   onCreateFolder,
   onMovePebble,
   onRenamePebble,
+  onRenameFolder, // <--- 这里解构出来
   onDeletePebbles,
-  onRestorePebbles
+  onRestorePebbles,
+  onUngroupFolder // <--- 新增：解构出来
 }) => {
   const [activeTab, setActiveTab] = useState<ArchiveTab>('vault');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
@@ -349,7 +353,14 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
 
   const commitRename = () => {
       if (editingId && editName.trim()) {
-          onRenamePebble(editingId, editName.trim());
+          // ★★★ 核心修复：先判断是文件夹还是 Pebble ★★★
+          const isFolder = folders.some(f => f.id === editingId);
+          
+          if (isFolder) {
+              onRenameFolder(editingId, editName.trim());
+          } else {
+              onRenamePebble(editingId, editName.trim());
+          }
       }
       setEditingId(null);
   };
@@ -365,46 +376,89 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
   // --- Render Helpers ---
 
   const renderContextMenu = () => {
-      // ... (ContextMenu code remains exactly the same as before) ...
-      if (!contextMenu.visible) return null;
+      if (!contextMenu.visible || !contextMenu.targetId) return null;
+      
+      // 预先查找目标对象，用于获取名称或执行特定逻辑
+      const targetPebble = visiblePebbles.find(p => p.id === contextMenu.targetId);
+      const targetFolder = folders.find(f => f.id === contextMenu.targetId);
+
       return (
           <div 
             ref={contextMenuRef}
             className="fixed z-[100] w-48 bg-stone-900/90 backdrop-blur-md border border-stone-700 rounded-lg shadow-2xl py-1 text-stone-200 text-sm overflow-hidden animate-in fade-in zoom-in-95 duration-100"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-              <button 
-                onClick={() => {
-                    const p = visiblePebbles.find(p => p.id === contextMenu.targetId);
-                    if (p) onSelectPebble(p);
-                    setContextMenu(prev => ({...prev, visible: false}));
-                }}
-                className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
-              >
-                  <CornerDownLeft size={14} /> Open Full
-              </button>
-              <button 
-                 onClick={() => {
-                    const p = visiblePebbles.find(p => p.id === contextMenu.targetId);
-                    if(p) startRenaming(p.id, p.topic);
-                 }}
-                 className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
-              >
-                  <Edit2 size={14} /> Rename
-              </button>
-              <div className="h-px bg-stone-700 my-1 mx-2" />
-              <button 
-                 onClick={() => {
-                    if (contextMenu.targetId) {
-                      const ids = Array.from(selectedIds).length > 0 ? Array.from(selectedIds) : [contextMenu.targetId];
-                      performDelete(ids as string[]);
-                    }
-                    setContextMenu(prev => ({...prev, visible: false}));
-                 }}
-                 className="w-full text-left px-4 py-2 hover:bg-red-900/50 text-red-400 flex items-center gap-2"
-              >
-                  <Trash2 size={14} /> Delete
-              </button>
+              {/* --- PEBBLE MENU --- */}
+              {contextMenu.type === 'pebble' && targetPebble && (
+                  <>
+                      <button 
+                        onClick={() => {
+                            onSelectPebble(targetPebble);
+                            setContextMenu(prev => ({...prev, visible: false}));
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
+                      >
+                          <CornerDownLeft size={14} /> Open Full
+                      </button>
+                      <button 
+                         onClick={() => {
+                            startRenaming(targetPebble.id, targetPebble.topic);
+                         }}
+                         className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
+                      >
+                          <Edit2 size={14} /> Rename
+                      </button>
+                      <div className="h-px bg-stone-700 my-1 mx-2" />
+                      <button 
+                         onClick={() => {
+                            // 优先处理多选删除，如果多选为空则删除当前右键的目标
+                            const ids = selectedIds.size > 0 ? Array.from(selectedIds) : [targetPebble.id];
+                            performDelete(ids);
+                            setContextMenu(prev => ({...prev, visible: false}));
+                         }}
+                         className="w-full text-left px-4 py-2 hover:bg-red-900/50 text-red-400 flex items-center gap-2"
+                      >
+                          <Trash2 size={14} /> Delete
+                      </button>
+                  </>
+              )}
+
+              {/* --- FOLDER MENU --- */}
+              {contextMenu.type === 'folder' && targetFolder && (
+                  <>
+                      <button 
+                        onClick={() => {
+                            setCurrentFolderId(targetFolder.id);
+                            setContextMenu(prev => ({...prev, visible: false}));
+                        }}
+                        className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
+                      >
+                          <CornerDownLeft size={14} /> Open
+                      </button>
+                      <button 
+                         onClick={() => {
+                            startRenaming(targetFolder.id, targetFolder.name);
+                         }}
+                         className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
+                      >
+                          <Edit2 size={14} /> Rename
+                      </button>
+                      
+                      <div className="h-px bg-stone-700 my-1 mx-2" />
+                      
+                      {/* ★★★ 这里的 Delete 换成了 Ungroup ★★★ */}
+                      <button 
+                         onClick={() => {
+                            // 调用从 props 传下来的 onUngroupFolder
+                            onUngroupFolder(targetFolder.id);
+                            setContextMenu(prev => ({...prev, visible: false}));
+                         }}
+                         className="w-full text-left px-4 py-2 hover:bg-stone-700 flex items-center gap-2"
+                      >
+                          <Layers size={14} /> Ungroup
+                      </button>
+                  </>
+              )}
           </div>
       );
   };
@@ -448,23 +502,54 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
           </div>
       );
   };
-
   const renderVaultGrid = () => (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 grid-dense pb-32" onClick={() => { setSelectedIds(new Set()); setPreviewPebble(null); }}>
         {/* Folders */}
         {gridItems.folders.map(folder => {
           const previews = visiblePebbles.filter(p => p.folderId === folder.id).slice(0, 4);
           const isSelected = selectedIds.has(folder.id);
+          
+          // ★★★ 新增：获取编辑状态 ★★★
+          const isEditing = editingId === folder.id;
+
           return (
             <div 
               key={folder.id}
-              onClick={(e) => { e.stopPropagation(); setCurrentFolderId(folder.id); setPreviewPebble(null); }}
+              onClick={(e) => { 
+                  // 如果正在编辑，点击卡片不要触发进入文件夹
+                  if (isEditing) { e.stopPropagation(); return; }
+                  e.stopPropagation(); 
+                  setCurrentFolderId(folder.id); 
+                  setPreviewPebble(null); 
+              }}
               onContextMenu={(e) => handleContextMenu(e, folder.id, 'folder')}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDropOnFolder(e, folder.id)}
               className={`col-span-2 row-span-2 bg-stone-800 rounded-2xl p-4 cursor-pointer hover:bg-stone-700 transition-all group relative border ${isSelected ? 'border-stone-400 ring-1 ring-stone-400' : 'border-stone-700 hover:border-stone-500'}`}
             >
-               <h3 className="text-stone-200 font-display font-bold mb-3 flex items-center gap-2"><Box size={16} className="text-stone-400" />{folder.name}</h3>
+               {/* ★★★ 修改：标题区域支持编辑模式 ★★★ */}
+               <div className="mb-3 flex items-center gap-2 h-7">
+                   <Box size={16} className="text-stone-400 flex-shrink-0" />
+                   
+                   {isEditing ? (
+                       <input 
+                           type="text"
+                           className="rename-input flex-1 min-w-0 bg-stone-900 border-b border-stone-400 text-stone-100 font-bold font-display focus:outline-none"
+                           value={editName}
+                           onChange={(e) => setEditName(e.target.value)}
+                           onKeyDown={(e) => { 
+                               if (e.key === 'Enter') commitRename(); 
+                               if (e.key === 'Escape') setEditingId(null); 
+                           }}
+                           autoFocus
+                           onBlur={commitRename}
+                           onClick={(e) => e.stopPropagation()}
+                       />
+                   ) : (
+                       <h3 className="text-stone-200 font-display font-bold truncate">{folder.name}</h3>
+                   )}
+               </div>
+
                <div className="grid grid-cols-2 grid-rows-2 gap-2 h-[120px]">
                  {previews.map(p => (
                      <div key={p.id} className="bg-stone-600 rounded-lg p-2 overflow-hidden flex items-center justify-center">
@@ -542,7 +627,6 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
   };
 
   const renderListRows = (parentId: string | null, depth: number) => {
-    // ... (This logic is same mostly) ...
     const childFolders = folders.filter(f => f.parentId === parentId);
     const childPebbles = visiblePebbles.filter(p => p.folderId === parentId);
 
@@ -553,27 +637,56 @@ export const TheArchive: React.FC<TheArchiveProps> = ({
 
     return (
       <>
-        {childFolders.map(folder => (
+        {childFolders.map(folder => {
+          // ★★★ 1. 获取当前文件夹的编辑状态 ★★★
+          const isEditing = editingId === folder.id;
+
+          return (
           <React.Fragment key={folder.id}>
             <div 
               className={`group flex items-center py-3 border-b border-stone-800 hover:bg-stone-800/50 transition-colors cursor-pointer select-none`}
-              onClick={(e) => toggleFolderExpand(e, folder.id)}
+              onClick={(e) => {
+                  // ★★★ 2. 如果正在编辑，点击行不要折叠/展开 ★★★
+                  if (isEditing) return; 
+                  toggleFolderExpand(e, folder.id);
+              }}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDropOnFolder(e, folder.id)}
+              onContextMenu={(e) => handleContextMenu(e, folder.id, 'folder')}
             >
               <div className="flex-1 flex items-center min-w-0" style={{ paddingLeft: `${depth * 24 + 16}px` }}>
                  {depth > 0 && <div className="absolute left-0 w-px h-full bg-stone-800" style={{ left: `${depth * 24}px`}} />}
+                 
                  <div className="mr-2 text-stone-500 hover:text-stone-300 transition-colors">
                     {expandedFolders.has(folder.id) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                  </div>
                  <Box size={16} className="text-stone-400 mr-3 flex-shrink-0" />
-                 <span className="font-medium text-stone-200 truncate">{folder.name}</span>
+                 
+                 {/* ★★★ 3. 条件渲染：输入框 OR 文本 ★★★ */}
+                 {isEditing ? (
+                     <input 
+                        type="text"
+                        className="rename-input bg-stone-900 border-b border-stone-400 text-stone-200 font-medium w-64 focus:outline-none"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => { 
+                            if (e.key === 'Enter') commitRename(); 
+                            if (e.key === 'Escape') setEditingId(null); 
+                        }}
+                        autoFocus
+                        onBlur={commitRename}
+                        onClick={(e) => e.stopPropagation()} // 防止点击输入框触发行点击
+                     />
+                 ) : (
+                     <span className="font-medium text-stone-200 truncate">{folder.name}</span>
+                 )}
+
                  <span className="ml-3 text-xs text-stone-600">{visiblePebbles.filter(p => p.folderId === folder.id).length} items</span>
               </div>
             </div>
             {expandedFolders.has(folder.id) && renderListRows(folder.id, depth + 1)}
           </React.Fragment>
-        ))}
+        )})}
 
         {childPebbles.map(pebble => renderPebbleListRow(pebble, depth))}
         
