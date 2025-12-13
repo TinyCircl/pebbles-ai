@@ -1,7 +1,7 @@
 # Pebbles AI: A Generative Cognitive Builder
 ### Pre-released version can be found here ↓
 ### 目前pebbles未发布版本可以在以下网址查看
-[🔗 Live Demo / Pebbles AI]( www.richardiffusion.me/pebbles/app)
+[🔗 Live Demo / Pebbles AI](www.richardiffusion.me/pebbles/app)
 
 <div align="center">
 
@@ -153,7 +153,7 @@ GEMINI_API_KEY=your_gemini_key
 
 -----
 
-\<a name="chinese"\>\</a\>
+<a name="chinese"></a>
 
 ## 🇨🇳 中文 (Chinese)
 
