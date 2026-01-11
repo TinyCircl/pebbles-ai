@@ -1,3 +1,4 @@
+# Pebbles is not the official name for this project
 # Pebbles AI: A Generative Cognitive Builder
 ### Pre-released version can be found here ↓
 ### 目前pebbles未发布版本可以在以下网址查看
